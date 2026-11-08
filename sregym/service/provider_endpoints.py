@@ -55,7 +55,10 @@ def provider_endpoint_rules(
     agent = policy.agent_name.casefold()
     model = (policy.model_id or "").strip()
 
-    if agent in {"autosubmit", "debug"}:
+    # No model destination: these clients call no model provider from the container.
+    # k8srca's runs its agent in a host-side service and reaches it through an
+    # explicit --allow-agent-endpoint (clients/k8srca/driver.py).
+    if agent in {"autosubmit", "debug", "k8srca"}:
         return ()
     if agent == "codex":
         custom_base = _configured_url(environment, "AGENT_API_BASE")

@@ -212,3 +212,10 @@ def test_claude_code_clients_reach_the_anthropic_api(agent):
     policy = InternetPolicy.from_mode("filtered", agent_name=agent, model_id="anthropic/claude-opus-5-5")
 
     assert provider_endpoint_rules(policy, {"ANTHROPIC_API_KEY": "secret"}) == (EndpointRule("api.anthropic.com", 443),)
+
+
+@pytest.mark.parametrize("agent", ["k8srca", "debug", "autosubmit"])
+def test_clients_that_call_no_model_from_the_container_allow_no_provider(agent):
+    policy = InternetPolicy.from_mode("filtered", agent_name=agent, model_id="anthropic/claude-haiku-4-5")
+
+    assert provider_endpoint_rules(policy, {}) == ()
