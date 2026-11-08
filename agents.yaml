@@ -33,6 +33,17 @@ agents:
     cluster_access: false  # no kubeconfig, no egress to the API proxy or SREGym's MCP server
     install_script: install-claudecode.sh
     agent_version: "2.1.301"  # >=2.1.296 keeps 4,096 chars of MCP server instructions
+  # k8srca: a shim to a host-side service that runs the agent; see clients/k8srca/driver.py.
+  # The service's address is as the container reaches it; allow it with
+  # --allow-agent-endpoint http://host.docker.internal:8765
+  - name: k8srca
+    kickoff_command: python -m clients.k8srca.driver
+    kickoff_workdir: .
+    kickoff_env:
+      K8SRCA_SERVICE_URL: "http://host.docker.internal:8765"
+    cluster_access: false  # no kubeconfig, no egress to the API proxy or SREGym's MCP server
+    install_script: null
+    agent_version: null
   - name: "debug"
     kickoff_command: "python -c \"import signal; signal.pause()\""
     install_script: null
