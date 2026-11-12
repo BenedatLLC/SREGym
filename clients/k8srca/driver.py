@@ -30,6 +30,13 @@ logger = logging.getLogger("all.k8srca.driver")
 #: Seconds the service gets, before the conductor's own deadline is looked at.
 DEFAULT_SERVICE_TIMEOUT = 45 * 60
 
+#: The diagnosis is started and then polled, never one blocking call: SREGym's egress proxy
+#: (mitmproxy, `tcp_timeout` 600) closes a connection that is silent for ten minutes, and a
+#: session over ten minutes lost its answer that way.
+POLL_SECONDS = 5.0
+#: Consecutive failed polls (a minute of them at the default) before the client gives up.
+MAX_POLL_FAILURES = 12
+
 
 def api_base_url() -> str:
     host = os.getenv("API_HOSTNAME", "localhost")
@@ -59,15 +66,41 @@ def get_app() -> dict:
     return r.json()
 
 
-def ask_service(app_info: dict, problem_id: str, timeout: float) -> str:
-    url = os.environ["K8SRCA_SERVICE_URL"].rstrip("/")
-    r = requests.post(f"{url}/diagnose", json={"problem_id": problem_id, "app_info": app_info}, timeout=(15, timeout))
+def _answer_from(r: requests.Response) -> str:
     if r.status_code != 200:
         raise RuntimeError(f"the k8srca service answered HTTP {r.status_code}: {r.text[:300]}")
     answer = r.json().get("answer", "")
     if not answer.strip():
         raise RuntimeError("the k8srca service returned no answer")
     return answer
+
+
+def ask_service(app_info: dict, problem_id: str, timeout: float) -> str:
+    """Start the diagnosis, then poll for it until `timeout` seconds have passed."""
+    url = os.environ["K8SRCA_SERVICE_URL"].rstrip("/")
+    started = requests.post(
+        f"{url}/diagnose/start", json={"problem_id": problem_id, "app_info": app_info}, timeout=(15, 60)
+    )
+    if started.status_code != 202:
+        raise RuntimeError(f"the k8srca service answered HTTP {started.status_code}: {started.text[:300]}")
+    job = started.json()["job"]
+    deadline = time.time() + timeout
+    failures = 0
+    while time.time() < deadline:
+        time.sleep(POLL_SECONDS)
+        try:
+            r = requests.get(f"{url}/diagnose/result/{job}", timeout=(15, 30))
+        except requests.RequestException as exc:
+            failures += 1
+            logger.warning("poll %d of %d failed: %s", failures, MAX_POLL_FAILURES, exc)
+            if failures >= MAX_POLL_FAILURES:
+                raise RuntimeError(f"the k8srca service stopped answering polls: {exc}") from exc
+            continue
+        failures = 0
+        if r.status_code == 202:
+            continue
+        return _answer_from(r)
+    raise TimeoutError(f"the k8srca service gave no answer within {timeout:.0f}s")
 
 
 def submit(answer: str) -> None:
